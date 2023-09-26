@@ -17,5 +17,5 @@ endif()
 target_include_directories(ocean PUBLIC include)
 
 find_package(Curses REQUIRED)
-include_directories(${CURSES_INCLUDE_DIR})
-target_link_libraries(ocean ${CURSES_LIBRARY})
+target_include_directories(ocean PUBLIC ${CURSES_INCLUDE_DIR})
+target_link_libraries(ocean PUBLIC ${CURSES_LIBRARY})
