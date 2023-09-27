@@ -104,10 +104,35 @@ editorRowInsertChar(Erow *row, int at, int c)
 }
 
 void
+editorRowDelChar(Erow *row, int at)
+{
+  if (at < 0 || at >= row->size)
+    return;
+  memmove(&row->chars[at], &row->chars[at + 1], row->size - at);
+  row->size--;
+  editorUpdateRow(row);
+  E.dirty++;
+}
+
+void
 editorInsertChar(int c)
 {
   editorRowInsertChar(&E.row[E.cy], E.cx, c);
   E.cx++;
+}
+
+void
+editorDelChar(void)
+{
+  Erow *row;
+  if (E.cy == E.numrows)
+    return;
+  row = &E.row[E.cy];
+  if (E.cx > 0)
+    {
+      editorRowDelChar(row, E.cx - 1);
+      E.cx--;
+    }
 }
 
 void
@@ -327,8 +352,12 @@ editorProcessKeypress(void)
       // TODO
       break;
     case KEY_BACKSPACE:
+    case 127:
     case CTRL_KEY('h'):
     case KEY_DC:
+      if (c == KEY_DC)
+        editorMoveCursor(KEY_RIGHT);
+      editorDelChar();
       break;
     case CTRL_KEY('l'):
       break;
