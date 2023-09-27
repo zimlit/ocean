@@ -2,6 +2,7 @@
 #define _BSD_SOURCE
 #define _GNU_SOURCE
 
+#include <errno.h>
 #include <ncurses.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -11,6 +12,8 @@
 #define CTRL_KEY(k) ((k)&0x1f)
 #define VERSION     "0.1"
 #define TABSTOP     8
+
+void editorSetStatusMessage(const char *fmt, ...);
 
 typedef struct
 {
@@ -29,6 +32,7 @@ typedef struct
   int screenrows;
   int numrows;
   Erow *row;
+  int dirty;
   char *filename;
   char statusmsg[80];
   time_t statusmsg_time;
@@ -87,6 +91,26 @@ editorUpdateRow(Erow *row)
 }
 
 void
+editorRowInsertChar(Erow *row, int at, int c)
+{
+  if (at < 0 || at > row->size)
+    at = row->size;
+  row->chars = realloc(row->chars, row->size + 2);
+  memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);
+  row->size++;
+  row->chars[at] = c;
+  editorUpdateRow(row);
+  E.dirty++;
+}
+
+void
+editorInsertChar(int c)
+{
+  editorRowInsertChar(&E.row[E.cy], E.cx, c);
+  E.cx++;
+}
+
+void
 editorAppendRow(char *s, size_t len)
 {
   int at          = E.numrows;
@@ -100,6 +124,29 @@ editorAppendRow(char *s, size_t len)
   editorUpdateRow(&E.row[at]);
 
   E.numrows++;
+  E.dirty++;
+}
+
+char *
+editorRowsToString(unsigned int *buflen)
+{
+  char *buf;
+  char *p;
+  int totlen = 0;
+  int j;
+  for (j = 0; j < E.numrows; j++)
+    totlen += E.row[j].size + 1;
+  *buflen = totlen;
+  buf     = malloc(totlen);
+  p       = buf;
+  for (j = 0; j < E.numrows; j++)
+    {
+      memcpy(p, E.row[j].chars, E.row[j].size);
+      p += E.row[j].size;
+      *p = '\n';
+      p++;
+    }
+  return buf;
 }
 
 void
@@ -124,6 +171,35 @@ editorOpen(char *filename)
     }
   free(line);
   fclose(fp);
+  E.dirty = 0;
+}
+
+void
+editorSave(void)
+{
+  unsigned int len;
+  FILE *fp;
+  char *buf;
+
+  if (!E.filename)
+    return;
+
+  buf = editorRowsToString(&len);
+  fp  = fopen(E.filename, "w");
+  if (!fp)
+    die("fopen");
+  if (fwrite(buf, sizeof(char), len, fp) == len)
+    {
+      editorSetStatusMessage("%d bytes written to disk", len);
+      E.dirty = 0;
+    }
+  else
+    {
+      editorSetStatusMessage("Can't save! I/O error: %s", strerror(errno));
+    }
+
+  fclose(fp);
+  free(buf);
 }
 
 void
@@ -135,6 +211,7 @@ init(void)
   nonl();
   keypad(stdscr, TRUE);
   timeout(100);
+  ESCDELAY = 0;
 
   E.cx             = 0;
   E.cy             = 0;
@@ -144,6 +221,7 @@ init(void)
   E.screenrows     = LINES - 2;
   E.numrows        = 0;
   E.row            = NULL;
+  E.dirty          = 0;
   E.filename       = NULL;
   E.statusmsg[0]   = '\0';
   E.statusmsg_time = 0;
@@ -242,6 +320,27 @@ editorProcessKeypress(void)
     case KEY_RESIZE:
       E.screenrows = LINES - 1;
       break;
+    case ERR:
+      break;
+    case '\r':
+    case KEY_ENTER:
+      // TODO
+      break;
+    case KEY_BACKSPACE:
+    case CTRL_KEY('h'):
+    case KEY_DC:
+      break;
+    case CTRL_KEY('l'):
+      break;
+    case KEY_EXIT:
+    case 27:
+      break;
+    case CTRL_KEY('s'):
+      editorSave();
+      break;
+    default:
+      editorInsertChar(c);
+      break;
     }
 }
 
@@ -308,8 +407,9 @@ void
 editorDrawStatusBar(void)
 {
   char status[80], rstatus[80];
-  int len  = snprintf(status, sizeof(status), "%.20s - %d lines",
-                     E.filename ? E.filename : "[No Name]", E.numrows);
+  int len  = snprintf(status, sizeof(status), "%.20s - %d lines %s",
+                     E.filename ? E.filename : "[No Name]", E.numrows,
+                     E.dirty ? "(modified)" : "");
   int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d", E.cy + 1, E.numrows);
 
   attron(A_REVERSE);
@@ -364,7 +464,7 @@ main(int argc, char *argv[])
   if (argc >= 2)
     editorOpen(argv[1]);
 
-  editorSetStatusMessage("HELP: Ctrl-Q = quit");
+  editorSetStatusMessage("HELP: Ctrl-S = save | Ctrl-Q = quit");
 
   while (1)
     {
