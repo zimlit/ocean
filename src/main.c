@@ -2,6 +2,7 @@
 #define _BSD_SOURCE
 #define _GNU_SOURCE
 
+#include <ctype.h>
 #include <errno.h>
 #include <ncurses.h>
 #include <stdarg.h>
@@ -14,6 +15,9 @@
 #define TABSTOP     8
 
 void editorSetStatusMessage(const char *fmt, ...);
+void editorRefreshScreen(void);
+char *editorPrompt(char *prompt);
+void editorInsertRow(int at, char *s, size_t len);
 
 typedef struct
 {
@@ -128,6 +132,10 @@ editorRowDelChar(Erow *row, int at)
 void
 editorInsertChar(int c)
 {
+  if (E.cy == E.numrows)
+    {
+      editorInsertRow(E.numrows, "", 0);
+    }
   editorRowInsertChar(&E.row[E.cy], E.cx, c);
   E.cx++;
 }
@@ -210,6 +218,7 @@ editorInsertNewline(void)
       editorUpdateRow(row);
     }
   E.cy++;
+  E.cx = 0;
 }
 
 char *
@@ -267,7 +276,14 @@ editorSave(void)
   char *buf;
 
   if (!E.filename)
-    return;
+    {
+      E.filename = editorPrompt("Save as %s");
+      if (!E.filename)
+        {
+          editorSetStatusMessage("Save aborted");
+          return;
+        }
+    }
 
   buf = editorRowsToString(&len);
   fp  = fopen(E.filename, "w");
@@ -296,7 +312,7 @@ init(void)
   nonl();
   keypad(stdscr, TRUE);
   timeout(100);
-  ESCDELAY = 0;
+  ESCDELAY = 10;
 
   E.cx             = 0;
   E.cy             = 0;
@@ -310,6 +326,54 @@ init(void)
   E.filename       = NULL;
   E.statusmsg[0]   = '\0';
   E.statusmsg_time = 0;
+}
+
+char *
+editorPrompt(char *prompt)
+{
+  size_t bufsize = 128;
+  char *buf      = malloc(bufsize);
+  size_t buflen  = 0;
+  buf[0]         = '\0';
+
+  while (1)
+    {
+      int c;
+
+      editorSetStatusMessage(prompt, buf);
+      editorRefreshScreen();
+
+      c = getch();
+      if (c == KEY_DC || c == KEY_BACKSPACE || c == CTRL_KEY('h') || c == 127)
+        {
+          if (buflen != 0)
+            buf[--buflen] = '\0';
+        }
+      else if (c == KEY_EXIT || c == 27)
+        {
+          editorSetStatusMessage("");
+          free(buf);
+          return NULL;
+        }
+      else if (c == '\r')
+        {
+          if (buflen != 0)
+            {
+              editorSetStatusMessage("");
+              return buf;
+            }
+        }
+      else if (!iscntrl(c) && c != -1 && c < 128)
+        {
+          if (buflen == bufsize - 1)
+            {
+              bufsize *= 2;
+              buf = realloc(buf, bufsize);
+            }
+          buf[buflen++] = c;
+          buf[buflen]   = '\0';
+        }
+    }
 }
 
 void
@@ -334,7 +398,7 @@ editorMoveCursor(int key)
         {
           E.cx++;
         }
-      else if (E.cx == (row.size ? row.size - 1 : 0))
+      else if (E.cx == (row.size ? row.size : 0))
         {
           E.cy++;
           E.cx = 0;
