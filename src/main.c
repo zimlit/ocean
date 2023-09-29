@@ -12,7 +12,7 @@
 
 #define CTRL_KEY(k) ((k)&0x1f)
 #define VERSION     "0.1"
-#define TABSTOP     8
+#define TABSTOP     2
 
 void editorSetStatusMessage(const char *fmt, ...);
 void editorRefreshScreen(void);
@@ -595,6 +595,13 @@ editorProcessKeypress(void)
     case CTRL_KEY('s'):
       editorSave();
       break;
+    case '\t':
+      {
+        int i;
+        for (i = 0; i < TABSTOP; i++)
+          editorInsertChar(' ');
+        break;
+      }
     default:
       editorInsertChar(c);
       break;
