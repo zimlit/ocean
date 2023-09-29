@@ -65,6 +65,22 @@ editorRowCxToRx(Erow *row, int cx)
   return rx;
 }
 
+int
+editorRowRxToCx(Erow *row, int rx)
+{
+  int cur_rx = 0;
+  int cx;
+  for (cx = 0; cx < row->size; cx++)
+    {
+      if (row->chars[cx] == '\t')
+        cur_rx += (TABSTOP - 1) - (cur_rx % TABSTOP);
+      cur_rx++;
+      if (cur_rx > rx)
+        return cx;
+    }
+  return cx;
+}
+
 void
 editorUpdateRow(Erow *row)
 {
@@ -304,6 +320,28 @@ editorSave(void)
 }
 
 void
+editorFind(void)
+{
+  int i;
+  char *query = editorPrompt("Search: %s (ESC to cancel)");
+  if (query == NULL)
+    return;
+  for (i = 0; i < E.numrows; i++)
+    {
+      Erow *row   = &E.row[i];
+      char *match = strstr(row->render, query);
+      if (match)
+        {
+          E.cy     = i;
+          E.cx     = editorRowRxToCx(row, match - row->render);
+          E.rowoff = E.numrows;
+          break;
+        }
+    }
+  free(query);
+}
+
+void
 init(void)
 {
   initscr();
@@ -432,7 +470,6 @@ editorProcessKeypress(void)
   switch (c)
     {
     case CTRL_KEY('q'):
-      endwin();
       exit(0);
       break;
     case KEY_NPAGE:
@@ -459,6 +496,9 @@ editorProcessKeypress(void)
       break;
     case KEY_END:
       E.cx = E.row[E.cy].size ? E.row[E.cy].size - 1 : 0;
+      break;
+    case CTRL_KEY('f'):
+      editorFind();
       break;
     case KEY_UP:
     case KEY_DOWN:
@@ -617,8 +657,8 @@ main(int argc, char *argv[])
   if (argc >= 2)
     editorOpen(argv[1]);
 
-  editorSetStatusMessage("HELP: Ctrl-S = save | Ctrl-Q = quit");
-
+  editorSetStatusMessage(
+      "HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = find");
   while (1)
     {
       editorRefreshScreen();
