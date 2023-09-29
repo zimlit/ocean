@@ -550,6 +550,12 @@ editorProcessKeypressNormal(int c)
     case 'l':
       editorMoveCursor(KEY_RIGHT);
       break;
+    case KEY_UP:
+    case KEY_DOWN:
+    case KEY_LEFT:
+    case KEY_RIGHT:
+      editorMoveCursor(c);
+      break;
     case 'q':
       clear();
       endwin();
