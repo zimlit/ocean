@@ -27,6 +27,12 @@ typedef struct
   char *render;
 } Erow;
 
+typedef enum
+{
+  NORMAL,
+  INSERT
+} Mode;
+
 typedef struct
 {
   int cx, cy;
@@ -40,6 +46,7 @@ typedef struct
   char *filename;
   char statusmsg[80];
   time_t statusmsg_time;
+  Mode mode;
 } Editor;
 
 Editor E;
@@ -418,6 +425,7 @@ init(void)
   E.filename       = NULL;
   E.statusmsg[0]   = '\0';
   E.statusmsg_time = 0;
+  E.mode           = NORMAL;
 }
 
 char *
@@ -526,9 +534,36 @@ editorMoveCursor(int key)
 }
 
 void
-editorProcessKeypress(void)
+editorProcessKeypressNormal(int c)
 {
-  int c = getch();
+  switch (c)
+    {
+    case 'h':
+      editorMoveCursor(KEY_LEFT);
+      break;
+    case 'j':
+      editorMoveCursor(KEY_DOWN);
+      break;
+    case 'k':
+      editorMoveCursor(KEY_UP);
+      break;
+    case 'l':
+      editorMoveCursor(KEY_RIGHT);
+      break;
+    case 'q':
+      clear();
+      endwin();
+      exit(0);
+      break;
+    case 'i':
+      E.mode = INSERT;
+      break;
+    }
+}
+
+void
+editorProcessKeypressInsert(int c)
+{
   switch (c)
     {
     case CTRL_KEY('q'):
@@ -602,8 +637,37 @@ editorProcessKeypress(void)
           editorInsertChar(' ');
         break;
       }
+    case 'j':
+      {
+        int c2 = getch();
+        if (c2 == 'k')
+          {
+            E.mode = NORMAL;
+          }
+        else
+          {
+            editorInsertChar(c);
+            editorProcessKeypressInsert(c2);
+          }
+        break;
+      }
     default:
       editorInsertChar(c);
+      break;
+    }
+}
+
+void
+editorProcessKeypress(void)
+{
+  int c = getch();
+  switch (E.mode)
+    {
+    case NORMAL:
+      editorProcessKeypressNormal(c);
+      break;
+    case INSERT:
+      editorProcessKeypressInsert(c);
       break;
     }
 }
@@ -671,7 +735,8 @@ void
 editorDrawStatusBar(void)
 {
   char status[80], rstatus[80];
-  int len  = snprintf(status, sizeof(status), "%.20s - %d lines %s",
+  int len  = snprintf(status, sizeof(status), "[%s] %.20s - %d lines %s",
+                     E.mode == NORMAL ? "NORMAL" : "INSERT",
                      E.filename ? E.filename : "[No Name]", E.numrows,
                      E.dirty ? "(modified)" : "");
   int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d", E.cy + 1, E.numrows);
