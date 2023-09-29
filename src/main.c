@@ -16,7 +16,7 @@
 
 void editorSetStatusMessage(const char *fmt, ...);
 void editorRefreshScreen(void);
-char *editorPrompt(char *prompt);
+char *editorPrompt(char *prompt, void (*callback)(char *, int));
 void editorInsertRow(int at, char *s, size_t len);
 
 typedef struct
@@ -293,7 +293,7 @@ editorSave(void)
 
   if (!E.filename)
     {
-      E.filename = editorPrompt("Save as %s");
+      E.filename = editorPrompt("Save as %s (ESC to cancel)", NULL);
       if (!E.filename)
         {
           editorSetStatusMessage("Save aborted");
@@ -319,13 +319,13 @@ editorSave(void)
   free(buf);
 }
 
-void
-editorFind(void)
+void editorFindCallback(char *query, int key)
 {
   int i;
-  char *query = editorPrompt("Search: %s (ESC to cancel)");
-  if (query == NULL)
+
+  if (key == '\r' || key == 27)
     return;
+  
   for (i = 0; i < E.numrows; i++)
     {
       Erow *row   = &E.row[i];
@@ -338,7 +338,29 @@ editorFind(void)
           break;
         }
     }
-  free(query);
+}
+
+void
+editorFind(void)
+{
+  int saved_cx = E.cx;
+  int saved_cy = E.cy;
+  int saved_coloff = E.coloff;
+  int saved_rowoff = E.rowoff;
+
+  char *query = editorPrompt("Search: %s (ESC to cancel)", editorFindCallback);
+
+  if (query)
+    {
+      free(query);
+    }
+  else
+    {
+      E.cx = saved_cx;
+      E.cy = saved_cy;
+      E.coloff = saved_coloff;
+      E.rowoff = saved_rowoff;
+    }
 }
 
 void
@@ -367,7 +389,7 @@ init(void)
 }
 
 char *
-editorPrompt(char *prompt)
+editorPrompt(char *prompt, void (*callback)(char *, int))
 {
   size_t bufsize = 128;
   char *buf      = malloc(bufsize);
@@ -390,6 +412,8 @@ editorPrompt(char *prompt)
       else if (c == KEY_EXIT || c == 27)
         {
           editorSetStatusMessage("");
+          if (callback)
+            callback(buf, c);
           free(buf);
           return NULL;
         }
@@ -398,6 +422,8 @@ editorPrompt(char *prompt)
           if (buflen != 0)
             {
               editorSetStatusMessage("");
+              if (callback)
+                callback(buf, c);
               return buf;
             }
         }
@@ -411,6 +437,8 @@ editorPrompt(char *prompt)
           buf[buflen++] = c;
           buf[buflen]   = '\0';
         }
+      if (callback)
+        callback(buf, c);
     }
 }
 
@@ -470,6 +498,8 @@ editorProcessKeypress(void)
   switch (c)
     {
     case CTRL_KEY('q'):
+      clear();
+      endwin();
       exit(0);
       break;
     case KEY_NPAGE:
