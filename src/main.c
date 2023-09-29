@@ -293,7 +293,7 @@ editorSave(void)
 
   if (!E.filename)
     {
-      E.filename = editorPrompt("Save as %s (ESC to cancel)", NULL);
+      E.filename = editorPrompt("Save as %s", NULL);
       if (!E.filename)
         {
           editorSetStatusMessage("Save aborted");
@@ -319,22 +319,54 @@ editorSave(void)
   free(buf);
 }
 
-void editorFindCallback(char *query, int key)
+void
+editorFindCallback(char *query, int key)
 {
+  int current;
   int i;
+  static int last_match = -1;
+  static int direction  = 1;
 
-  if (key == '\r' || key == 27)
-    return;
-  
+  if (key == '\r' || key == '\x1b')
+    {
+      last_match = -1;
+      direction  = 1;
+      return;
+    }
+  else if (key == KEY_RIGHT || key == KEY_DOWN)
+    {
+      direction = 1;
+    }
+  else if (key == KEY_LEFT || key == KEY_UP)
+    {
+      direction = -1;
+    }
+  else
+    {
+      last_match = -1;
+      direction  = 1;
+    }
+  if (last_match == -1)
+    direction = 1;
+  current = last_match;
   for (i = 0; i < E.numrows; i++)
     {
-      Erow *row   = &E.row[i];
-      char *match = strstr(row->render, query);
+      Erow *row;
+      char *match;
+
+      current += direction;
+      if (current == -1)
+        current = E.numrows - 1;
+      else if (current == E.numrows)
+        current = 0;
+      row   = &E.row[current];
+      match = strstr(row->render, query);
       if (match)
         {
-          E.cy     = i;
-          E.cx     = editorRowRxToCx(row, match - row->render);
-          E.rowoff = E.numrows;
+          last_match = current;
+          E.cy       = current;
+          E.cx       = editorRowRxToCx(row, match - row->render);
+          E.rowoff   = E.numrows;
           break;
         }
     }
@@ -343,12 +375,12 @@ void editorFindCallback(char *query, int key)
 void
 editorFind(void)
 {
-  int saved_cx = E.cx;
-  int saved_cy = E.cy;
+  int saved_cx     = E.cx;
+  int saved_cy     = E.cy;
   int saved_coloff = E.coloff;
   int saved_rowoff = E.rowoff;
 
-  char *query = editorPrompt("Search: %s (ESC to cancel)", editorFindCallback);
+  char *query = editorPrompt("Search: %s", editorFindCallback);
 
   if (query)
     {
@@ -356,8 +388,8 @@ editorFind(void)
     }
   else
     {
-      E.cx = saved_cx;
-      E.cy = saved_cy;
+      E.cx     = saved_cx;
+      E.cy     = saved_cy;
       E.coloff = saved_coloff;
       E.rowoff = saved_rowoff;
     }
@@ -427,7 +459,9 @@ editorPrompt(char *prompt, void (*callback)(char *, int))
               return buf;
             }
         }
-      else if (!iscntrl(c) && c != -1 && c < 128)
+      else if (c == -1)
+        continue;
+      else if (!iscntrl(c) && c < 128)
         {
           if (buflen == bufsize - 1)
             {
@@ -456,7 +490,7 @@ editorMoveCursor(int key)
       else if (E.cy > 0)
         {
           E.cy--;
-          E.cx = E.row[E.cy].size ? E.row[E.cy].size - 1 : 0;
+          E.cx = E.row[E.cy].size;
         }
       break;
     case KEY_RIGHT:
@@ -487,7 +521,7 @@ editorMoveCursor(int key)
   row = E.row[E.cy];
   if (E.cx > row.size)
     {
-      E.cx = row.size ? row.size - 1 : 0;
+      E.cx = row.size;
     }
 }
 
