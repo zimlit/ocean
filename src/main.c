@@ -30,7 +30,8 @@ typedef struct
 typedef enum
 {
   NORMAL,
-  INSERT
+  INSERT,
+  VISUAL_CHAR
 } Mode;
 
 typedef struct
@@ -217,7 +218,7 @@ editorDelChar(void)
     }
   else
     {
-      E.cx = E.row[E.cy - 1].size;
+      E.cx = E.row[E.cy].size ? E.row[E.cy].size - 1 : 0;
       editorRowAppendString(&E.row[E.cy - 1], row->chars, row->size);
       editorDelRow(E.cy);
       E.cy--;
@@ -490,7 +491,7 @@ editorMoveCursor(int key)
   Erow row = E.row[E.cy];
   switch (key)
     {
-    case KEY_LEFT:
+    case 'h':
       if (E.cx != 0)
         {
           E.cx--;
@@ -498,27 +499,27 @@ editorMoveCursor(int key)
       else if (E.cy > 0)
         {
           E.cy--;
-          E.cx = E.row[E.cy].size;
+          E.cx = E.row[E.cy].size ? E.row[E.cy].size - 1 : 0;
         }
       break;
-    case KEY_RIGHT:
-      if (E.cx < row.size)
+    case 'l':
+      if (E.cx < (E.row[E.cy].size ? E.row[E.cy].size - 1 : 0))
         {
           E.cx++;
         }
-      else if (E.cx == (row.size ? row.size : 0))
+      else if (E.cx == (E.row[E.cy].size ? E.row[E.cy].size - 1 : 0))
         {
           E.cy++;
           E.cx = 0;
         }
       break;
-    case KEY_UP:
+    case 'k':
       if (E.cy != 0)
         {
           E.cy--;
         }
       break;
-    case KEY_DOWN:
+    case 'j':
       if (E.cy < E.numrows - 1)
         {
           E.cy++;
@@ -527,9 +528,9 @@ editorMoveCursor(int key)
     }
 
   row = E.row[E.cy];
-  if (E.cx > row.size)
+  if (E.cx > (row.size ? row.size - 1 : 0))
     {
-      E.cx = row.size;
+      E.cx = row.size ? row.size - 1 : 0;
     }
 }
 
@@ -539,21 +540,9 @@ editorProcessKeypressNormal(int c)
   switch (c)
     {
     case 'h':
-      editorMoveCursor(KEY_LEFT);
-      break;
     case 'j':
-      editorMoveCursor(KEY_DOWN);
-      break;
     case 'k':
-      editorMoveCursor(KEY_UP);
-      break;
     case 'l':
-      editorMoveCursor(KEY_RIGHT);
-      break;
-    case KEY_UP:
-    case KEY_DOWN:
-    case KEY_LEFT:
-    case KEY_RIGHT:
       editorMoveCursor(c);
       break;
     case 'q':
@@ -564,6 +553,31 @@ editorProcessKeypressNormal(int c)
     case 'i':
       E.mode = INSERT;
       break;
+    case 'a':
+      E.cx++;
+      E.mode = INSERT;
+      break;
+    case 'A':
+      E.cx   = E.row[E.cy].size;
+      E.mode = INSERT;
+      break;
+    case 'o':
+      editorInsertRow(E.cy + 1, "", 0);
+      E.cy++;
+      E.cx   = 0;
+      E.mode = INSERT;
+      break;
+    case 'O':
+      editorInsertRow(E.cy, "", 0);
+      E.cy   = E.cy ? E.cy-- : 0;
+      E.cx   = 0;
+      E.mode = INSERT;
+      break;
+    case '/':
+      editorFind();
+      break;
+    case 'v':
+      E.mode = VISUAL_CHAR;
     }
 }
 
@@ -605,12 +619,6 @@ editorProcessKeypressInsert(int c)
     case CTRL_KEY('f'):
       editorFind();
       break;
-    case KEY_UP:
-    case KEY_DOWN:
-    case KEY_LEFT:
-    case KEY_RIGHT:
-      editorMoveCursor(c);
-      break;
     case KEY_RESIZE:
       E.screenrows = LINES - 1;
       break;
@@ -643,6 +651,11 @@ editorProcessKeypressInsert(int c)
           editorInsertChar(' ');
         break;
       }
+    case KEY_LEFT:
+    case KEY_RIGHT:
+    case KEY_DOWN:
+    case KEY_UP:
+      break;
     case 'j':
       {
         int c2 = getch();
@@ -653,6 +666,7 @@ editorProcessKeypressInsert(int c)
         else
           {
             editorInsertChar(c);
+            editorRefreshScreen();
             editorProcessKeypressInsert(c2);
           }
         break;
@@ -660,6 +674,34 @@ editorProcessKeypressInsert(int c)
     default:
       editorInsertChar(c);
       break;
+    }
+}
+
+void
+editorProcessKeypressVisualChar(int c)
+{
+  switch (c)
+    {
+    case 'h':
+    case 'k':
+    case 'l':
+      editorMoveCursor(c);
+      break;
+    case 'j':
+      {
+        int c2 = getch();
+        if (c2 == 'k')
+          {
+            E.mode = NORMAL;
+          }
+        else
+          {
+            editorMoveCursor('j');
+            editorRefreshScreen();
+            editorProcessKeypressVisualChar(c2);
+          }
+        break;
+      }
     }
 }
 
@@ -674,6 +716,9 @@ editorProcessKeypress(void)
       break;
     case INSERT:
       editorProcessKeypressInsert(c);
+      break;
+    case VISUAL_CHAR:
+      editorProcessKeypressVisualChar(c);
       break;
     }
 }
@@ -740,12 +785,24 @@ editorScroll(void)
 void
 editorDrawStatusBar(void)
 {
-  char status[80], rstatus[80];
-  int len  = snprintf(status, sizeof(status), "[%s] %.20s - %d lines %s",
-                     E.mode == NORMAL ? "NORMAL" : "INSERT",
-                     E.filename ? E.filename : "[No Name]", E.numrows,
-                     E.dirty ? "(modified)" : "");
-  int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d", E.cy + 1, E.numrows);
+  char status[80], rstatus[80], mode[20];
+  int len, rlen;
+  switch (E.mode)
+    {
+    case NORMAL:
+      snprintf(mode, sizeof(mode), "NORMAL");
+      break;
+    case INSERT:
+      snprintf(mode, sizeof(mode), "INSERT");
+      break;
+    case VISUAL_CHAR:
+      snprintf(mode, sizeof(mode), "VISUAL");
+      break;
+    }
+  len  = snprintf(status, sizeof(status), "[%s] %.20s - %d lines %s", mode,
+                 E.filename ? E.filename : "[No Name]", E.numrows,
+                 E.dirty ? "(modified)" : "");
+  rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d", E.cy + 1, E.numrows);
 
   attron(A_REVERSE);
   while (len < COLS)
