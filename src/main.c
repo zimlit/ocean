@@ -25,6 +25,7 @@ typedef struct
   int rsize;
   char *chars;
   char *render;
+  signed char *hl;
 } Erow;
 
 typedef enum
@@ -33,6 +34,12 @@ typedef enum
   INSERT,
   VISUAL_CHAR
 } Mode;
+
+enum EditorHiglight
+{
+  HL_NORMAL,
+  HL_SELECTED = 1 << 7
+};
 
 typedef struct
 {
@@ -178,6 +185,7 @@ editorInsertRow(int at, char *s, size_t len)
   E.row[at].chars[len] = '\0';
   E.row[at].rsize      = 0;
   E.row[at].render     = NULL;
+  E.row[at].hl         = NULL;
   editorUpdateRow(&E.row[at]);
 
   E.numrows++;
@@ -189,6 +197,7 @@ editorFreeRow(Erow *row)
 {
   free(row->render);
   free(row->chars);
+  free(row->hl);
 }
 void
 editorDelRow(int at)
@@ -388,7 +397,7 @@ editorFind(void)
   int saved_coloff = E.coloff;
   int saved_rowoff = E.rowoff;
 
-  char *query = editorPrompt("Search: %s", editorFindCallback);
+  char *query = editorPrompt("/%s", editorFindCallback);
 
   if (query)
     {
@@ -411,7 +420,7 @@ init(void)
   raw();
   nonl();
   keypad(stdscr, TRUE);
-  timeout(100);
+  timeout(300);
   ESCDELAY = 10;
 
   E.cx             = 0;
@@ -489,6 +498,8 @@ void
 editorMoveCursor(int key)
 {
   Erow row = E.row[E.cy];
+  if (!E.numrows)
+    return;
   switch (key)
     {
     case 'h':
@@ -554,24 +565,65 @@ editorProcessKeypressNormal(int c)
       E.mode = INSERT;
       break;
     case 'a':
-      E.cx++;
+      if (E.numrows)
+        E.cx++;
       E.mode = INSERT;
       break;
     case 'A':
-      E.cx   = E.row[E.cy].size;
+      if (E.numrows)
+        E.cx = E.row[E.cy].size;
       E.mode = INSERT;
       break;
     case 'o':
+      if (!E.numrows)
+        break;
       editorInsertRow(E.cy + 1, "", 0);
       E.cy++;
       E.cx   = 0;
       E.mode = INSERT;
       break;
     case 'O':
+      if (!E.numrows)
+        break;
       editorInsertRow(E.cy, "", 0);
       E.cy   = E.cy ? E.cy-- : 0;
       E.cx   = 0;
       E.mode = INSERT;
+      break;
+    case 'x':
+      if (!E.numrows)
+        break;
+      E.cx++;
+      editorDelChar();
+      break;
+    case 'd':
+      {
+        Erow row;
+        int c2 = getch();
+        if (c2 == 'd')
+          {
+            if (E.numrows == 0)
+              break;
+            editorDelRow(E.cy);
+            if (E.numrows != 0)
+              {
+                row = E.row[E.cy];
+                if (E.cx > (row.size ? row.size - 1 : 0))
+                  {
+                    E.cx = row.size ? row.size - 1 : 0;
+                  }
+              }
+            else
+              {
+                E.cx = 0;
+              }
+            editorRefreshScreen();
+          }
+        else
+          {
+            editorProcessKeypressNormal(c2);
+          }
+      }
       break;
     case '/':
       editorFind();
