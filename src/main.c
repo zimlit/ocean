@@ -1,3 +1,22 @@
+/**
+ * Copyright (C) 2024 Devin Rockwell
+ *
+ * This file is part of ocean.
+ *
+ * ocean is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * ocean is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with ocean.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #define _DEFAULT_SOURCE
 #define _BSD_SOURCE
 #define _GNU_SOURCE
@@ -19,6 +38,13 @@ void editorRefreshScreen(void);
 char *editorPrompt(char *prompt, void (*callback)(char *, int));
 void editorInsertRow(int at, char *s, size_t len);
 
+enum EditorHiglightType
+{
+    HL_NORMAL,
+    HL_MATCH,
+    HL_SELECT = 1 << 7
+};
+
 typedef struct
 {
     int size;
@@ -35,13 +61,6 @@ typedef enum
     VISUAL_CHAR
 } Mode;
 
-enum EditorHiglight
-{
-    HL_NORMAL,
-    HL_MATCH = 1 << 7,
-    HL_SELECT = 1 << 6
-};
-
 typedef struct
 {
     int cx, cy;
@@ -56,6 +75,9 @@ typedef struct
     char statusmsg[80];
     time_t statusmsg_time;
     Mode mode;
+    int selection_x, selection_y;
+    int buffer_size;
+    char *copy_buffer;
 } Editor;
 
 Editor E;
@@ -491,6 +513,11 @@ void init(void)
     E.statusmsg[0] = '\0';
     E.statusmsg_time = 0;
     E.mode = NORMAL;
+    E.selection_x = 0;
+    E.selection_y = 0;
+    E.buffer_size = 80;
+    E.copy_buffer = malloc(E.buffer_size);
+    *E.copy_buffer = '\0';
 }
 
 char *editorPrompt(char *prompt, void (*callback)(char *, int))
@@ -566,11 +593,12 @@ char *editorPrompt(char *prompt, void (*callback)(char *, int))
 
 void editorMoveCursor(int key)
 {
-    Erow row = E.row[E.cy];
+    Erow row;
     if (!E.numrows)
     {
         return;
     }
+    row = E.row[E.cy];
     switch (key)
     {
     case 'h':
@@ -673,7 +701,13 @@ void editorProcessKeypressNormal(int c)
         {
             break;
         }
+
+        E.copy_buffer[0] = E.row[E.cy].chars[E.cx];
+        E.copy_buffer[1] = '\0';
         E.cx++;
+
+        editorSetStatusMessage("Copied %c", E.copy_buffer[0]);
+
         editorDelChar();
         break;
     case 'd':
@@ -712,6 +746,17 @@ void editorProcessKeypressNormal(int c)
         break;
     case 'v':
         E.mode = VISUAL_CHAR;
+        E.selection_x = E.cx;
+        E.selection_y = E.cy;
+        break;
+    case 'p':
+    {
+        int i;
+        for (i = 0; E.copy_buffer[i] != '\0'; i++)
+        {
+            editorInsertChar(E.copy_buffer[i]);
+        }
+    }
     }
 }
 
@@ -823,7 +868,11 @@ void editorProcessKeypressVisualChar(int c)
     switch (c)
     {
     case 'h':
+        editorMoveCursor(c);
+        break;
     case 'k':
+        editorMoveCursor(c);
+        break;
     case 'l':
         editorMoveCursor(c);
         break;
@@ -911,7 +960,34 @@ void editorDrawRows(void)
 
             for (j = 0; j < len; j++)
             {
-                if (hl[j] != current_color)
+                int selection_start_y =
+                    E.selection_y < E.cy ? E.selection_y : E.cy;
+                int selection_end_y =
+                    E.selection_y > E.cy ? E.selection_y : E.cy;
+                int selection_start_x =
+                    E.selection_x < E.cx ? E.selection_x : E.cx + E.coloff;
+                int selection_end_x =
+                    E.selection_x > E.cx ? E.selection_x : E.cx + E.coloff;
+                if (E.mode == VISUAL_CHAR &&
+                    (selection_start_y == selection_end_y &&
+                     y == selection_start_y && j >= selection_start_x &&
+                     j <= selection_end_x))
+                {
+                    attroff(COLOR_PAIR(current_color));
+                    current_color = HL_SELECT;
+                    attron(COLOR_PAIR(current_color));
+                }
+                else if (E.mode == VISUAL_CHAR &&
+                         selection_start_y != selection_end_y &&
+                         ((y == selection_start_y && j >= selection_start_x) ||
+                          (y == selection_end_y && j <= selection_end_x) ||
+                          (y > selection_start_y && y < selection_end_y)))
+                {
+                    attroff(COLOR_PAIR(current_color));
+                    current_color = HL_SELECT;
+                    attron(COLOR_PAIR(current_color));
+                }
+                else if (hl[j] != current_color)
                 {
                     attroff(COLOR_PAIR(current_color));
                     current_color = hl[j];
